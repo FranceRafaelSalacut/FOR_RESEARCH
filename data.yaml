@@ -1,0 +1,13 @@
+path: dataset_part2  # Root directory of the dataset
+train: dataset_part2/images/train  # Path to training images
+val: dataset_part2/images/val  # Path to validation images
+test: dataset_part2/images/test
+nc: 5
+
+names:
+  0: NO_DR
+  1: MILD
+  2: MODERATE
+  3: SEVERE
+  4: PROLIFERATIVE_DR
+

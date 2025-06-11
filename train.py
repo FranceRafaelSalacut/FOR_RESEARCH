@@ -68,7 +68,7 @@ def train(hyp, opt, device, tb_writer=None):
     loggers = {'wandb': None}  # loggers dict
     if rank in [-1, 0]:
         opt.hyp = hyp  # add hyperparameters
-        run_id = torch.load(weights).get('wandb_id') if weights.endswith('.pt') and os.path.isfile(weights) else None
+        run_id = torch.load(weights, weights_only=False).get('wandb_id') if weights.endswith('.pt') and os.path.isfile(weights) else None
         wandb_logger = WandbLogger(opt, Path(opt.save_dir).stem, run_id, data_dict)
         loggers['wandb'] = wandb_logger.wandb
         data_dict = wandb_logger.data_dict
@@ -85,7 +85,7 @@ def train(hyp, opt, device, tb_writer=None):
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         # ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        ckpt = torch.load(weights)  # load checkpoint
+        ckpt = torch.load(weights, weights_only=False)  # load checkpoint
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
         state_dict = ckpt['model'].float().state_dict()  # to FP32
@@ -247,6 +247,10 @@ def train(hyp, opt, device, tb_writer=None):
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...')
+    
+    best_score = 0
+    patience_counter = 0
+
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
 
@@ -388,6 +392,7 @@ def train(hyp, opt, device, tb_writer=None):
                 best_fitness = fi
             wandb_logger.end_epoch(best_result=best_fitness == fi)
 
+
             # Save model
             if (not opt.nosave) or (final_epoch and not opt.evolve):  # if save
                 ckpt = {'epoch': epoch,
@@ -410,6 +415,20 @@ def train(hyp, opt, device, tb_writer=None):
                 del ckpt
 
         # end epoch ----------------------------------------------------------------------------------------------------
+        
+        if fi > best_score:
+            best_score = fi
+            patience_counter = 0
+        else:
+            
+            patience_counter += 1
+            print(f'No improvement for {patience_counter} epoch(s). Patience = {opt.patience}')
+            if patience_counter >= opt.patience:
+                print(f"⏹️ Early stopping triggered at epoch {epoch+1} due to no improvement for {opt.patience} epochs.")
+                logger.info(f"fi score{fi}\nBest Score{best_score}\nPatience counter{patience_counter}")
+                break            
+        logger.info(f"fi score{fi}\nBest Score{best_score}\nPatience counter {patience_counter}")
+        
     # end training
     if rank in [-1, 0]:
         # Plots
@@ -490,6 +509,7 @@ if __name__ == '__main__':
     parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval for W&B')
     parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
     parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
+    parser.add_argument("--patience", type=int, default=1000, help="EarlyStopping patience (epochs without improvement)")
     opt = parser.parse_args()
 
     # Set DDP variables
@@ -589,7 +609,11 @@ if __name__ == '__main__':
                 x = np.loadtxt('evolve.txt', ndmin=2)
                 n = min(5, len(x))  # number of previous results to consider
                 x = x[np.argsort(-fitness(x))][:n]  # top n mutations
-                w = fitness(x) - fitness(x).min()  # weights
+                w = fitness(x) #- fitness(x).min()  # weights
+
+                logger.info(f"{fitness(x).min()}")
+                logger.info(f"{fitness(x)}")
+                logger.info(f"{w}")
                 if parent == 'single' or len(x) == 1:
                     # x = x[random.randint(0, n - 1)]  # random selection
                     x = x[random.choices(range(n), weights=w)[0]]  # weighted selection

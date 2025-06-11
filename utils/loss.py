@@ -204,11 +204,14 @@ class ComputeLoss:
             gxy = t[:, 2:4]  # grid xy
             gwh = t[:, 4:6]  # grid wh
             gij = (gxy - offsets).long()
-            gi, gj = gij.T  # grid xy indices
+            gi, gj = gij.long().T  # grid xy indices
 
             # Append
             a = t[:, 6].long()  # anchor indices
-            indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+            #indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+            gj = gj.clamp(0, gain[3] - 1).long()
+            gi = gi.clamp(0, gain[2] - 1).long()
+            indices.append((b, a, gj, gi))
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
